@@ -64,11 +64,11 @@ Now that our gene model reference is ready we can load in samples and analyze th
 
 ***Samples***
 ```{r}
-info<- read.csv(file = "P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/RNAseq_8_hour_heat_study/usftp21.novogene.com/RNAseq_bamlist_metadata.csv", #reading in the sample information
+info<- read.csv(file = "P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/ViCTER/RNA_seq/usftp21.novogene.com/RNAseq_bamlist_metadata.csv", #reading in the sample information
                    header = T, 
                    sep = ",")
 
-filenames <- file.path("P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/RNAseq_8_hour_heat_study/usftp21.novogene.com/02.Bam/", 
+filenames <- file.path("P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/ViCTER/RNA_seq/usftp21.novogene.com/02.Bam/", 
                            info$bam_ID)
 file.exists(filenames) #a sanity check to make sure you have files named
 ```
