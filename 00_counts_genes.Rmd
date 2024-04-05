@@ -4,11 +4,13 @@ output:
   pdf_document: default
   html_notebook: default
 ---
+
 ```{r}
 #BiocManager::install("Mus.musculus")
 ```
 
 The majority of Library packages are listed here. If you want to include more just install and load at the end of the list. If code isn't recognizing the function, it is likely that R didn't load the package that the function comes from.
+
 #load libraries every time
 ```{r, results=FALSE}
 library(ggplot2)
