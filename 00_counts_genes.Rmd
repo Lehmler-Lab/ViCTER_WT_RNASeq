@@ -44,7 +44,7 @@ Set your working directory and pull in your reference genome to compare your sam
 ***Define the Gene Model***
 ```{r}
 
-z <- import("P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/RNAseq_8_hour_heat_study/usftp21.novogene.com/04.Ref/genome.gtf.gz")
+z <- import("P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/ViCTER/RNA_seq/usftp21.novogene.com/04.Ref/genome.gtf.gz")
 
 txdb <- makeTxDbFromGRanges(z)
 txdb
