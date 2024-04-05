@@ -1,0 +1,109 @@
+---
+title: "RNAseq Differential Expression"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+```{r}
+#BiocManager::install("Mus.musculus")
+```
+
+The majority of Library packages are listed here. If you want to include more just install and load at the end of the list. If code isn't recognizing the function, it is likely that R didn't load the package that the function comes from.
+#load libraries every time
+```{r, results=FALSE}
+library(ggplot2)
+#install.packages("devtools")
+library(devtools)
+library(rgl)
+library(tidyverse)
+library(tidyr)
+#install.packages("expss")
+library(expss)
+library(dplyr)
+library(BiocManager)
+#install.packages("RMariaDB")
+library(RMariaDB)
+#install.packages("installr")
+#library(installr)
+#updateR()
+#BiocManager::install("GenomicAlignments")
+library(GenomicAlignments)
+#BiocManager::install("BiocParallel")
+library(BiocParallel)
+#BiocManager::install("GenomicFeatures")
+library(GenomicFeatures)
+#BiocManager::install("rtracklayer")
+library(rtracklayer)
+```
+
+
+Set your working directory and pull in your reference genome to compare your samples to. We will read the gene model from an Ensembl GTF file. Be sure your gene model reflects the same model used in your samples. 
+
+***Define the Gene Model***
+```{r}
+
+z <- import("P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/RNAseq_8_hour_heat_study/usftp21.novogene.com/04.Ref/genome.gtf.gz")
+
+txdb <- makeTxDbFromGRanges(z)
+txdb
+```
+
+For additional notes reference "https://www.bioconductor.org/help/course-materials/2016/CSAMA/lab-3-rnaseq/rnaseq_gene_CSAMA2016.html"
+
+The following line produces a GRangesList of all the exons grouped by gene (Lawrence et al. 2013). Each element of the list is a GRanges object of the exons for a gene
+```{r}
+ebg <- exonsBy(txdb, 
+               by="gene")
+ebg
+g_ids<-names(ebg)
+```
+
+Now that our gene model reference is ready we can load in samples and analyze them accordingly. I found separating by tissue type was easiest. But it can also be helpful to load all samples together. 
+
+***Samples***
+```{r}
+info<- read.csv(file = "P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/RNAseq_8_hour_heat_study/usftp21.novogene.com/RNAseq_bamlist_metadata.csv", #reading in the sample information
+                   header = T, 
+                   sep = ",")
+
+filenames <- file.path("P:/OEH/Faculty/hlehmler/research/Lehmler lab/Laura/RNAseq_8_hour_heat_study/usftp21.novogene.com/02.Bam/", 
+                           info$bam_ID)
+file.exists(filenames) #a sanity check to make sure you have files named
+```
+
+Next specify the details about how the BAM files should be treated in R, e.g., only process 2 million reads at a time. This can be modified to your computing limitations.
+```{r}
+bamfiles <- BamFileList(filenames, 
+                            yieldSize=2000000)
+seqinfo(bamfiles)
+```
+
+#Counting genes
+```{r}
+
+se <- summarizeOverlaps(features=ebg, #define the gene reference
+                            reads=bamfiles, #samples to be read
+                            mode="Union", 
+                            singleEnd=FALSE, #False indicates samples are paired-end
+                            ignore.strand=FALSE, #not a strand specific experiment
+                            BPPARAM= SerialParam(progressbar = TRUE)) #progress bar shown
+se
+head(assay(se)) #access the counts
+str(metadata(rowRanges(se))) #just to look a the structure of data
+
+
+
+```
+```{r}
+rownames(info)<-info$bam_ID
+colData(se) #metadata about the samples
+colData(se)<-DataFrame(info) #take the sample info and assign it as the metadata
+se$exposure<- as.factor(se$exposure)
+se$tissue_type<- as.factor(se$tissue_type)#organizing structure of groups
+se$sex<- as.factor(se$sex)#organizing structure of groups
+#se$batch_id<- as.factor(se$batch_id)
+se$exposure<- relevel(se$exposure, 
+                           "control") # tells the system which group is "control"
+se <- se[ rowSums(assay(se)) >= 10, ] #remove genes that have a total count less than 10, a good prefilter measure
+```
+
