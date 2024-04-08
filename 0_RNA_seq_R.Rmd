@@ -1,0 +1,1182 @@
+---
+title: "RNAseq Differential Expression"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+--------
+
+
+
+-----------
+#installing bioconductor packages
+```{r include=FALSE}
+#install.packages("devtools")
+#install.packages("BiocManager")
+#BiocManager::install("TxDb.Rnorvegicus.UCSC.rn6.refGene")
+BiocManager::install("Rsubread")
+BiocManager::install("DESeq2")
+BiocManager::install("pheatmap")
+#BiocManager::install("Rattus.norvegicus")
+BiocManager::install("EnhancedVolcano")
+BiocManager::install("topGO")
+BiocManager::install("gridExtra")
+#BiocManager::install("org.Rn.eg.db")
+BiocManager::install("DOSE")
+BiocManager::install("clusterProfiler")
+BiocManager::install("pathview")
+#BiocManager::install("fgsea")
+BiocManager::install("factoextra")
+BiocManager::install("scRNAseq")
+BiocManager::install("VennDiagram")
+BiocManager::install("babelgene")
+```
+
+#Load libraries
+```{r include=FALSE}
+library(ggplot2)
+library(rgl)
+library(tidyr)
+library(tidyverse)
+library(RColorBrewer)
+library(expss)
+library(dplyr)
+library(BiocManager)
+library(Rsamtools)
+library(GenomicAlignments)
+library(BiocParallel)
+library(GenomicFeatures)
+library(Rsubread)
+library(DESeq2)
+library(Rsamtools)
+library(pheatmap)
+library(AnnotationDbi)
+library(Mus.musculus)
+library(EnhancedVolcano)
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+library(topGO)
+library(org.Mm.eg.db)
+library(gridExtra)
+library(DOSE)
+library(clusterProfiler)
+library(fgsea)
+library(factoextra)
+library(pathview)
+library(enrichplot)
+library(readr)
+library(ggpubr)
+library(ggsignif)
+library(rstatix)
+library(scRNAseq)
+library(VennDiagram)
+library(stringr)
+library(tibble)
+library(org.Hs.eg.db)
+library(viridis)
+library(readr)
+library(patchwork)
+library(babelgene)
+```
+
+
+#***Using DeSeq2***
+We can now construct a DESeqDataSet object to formulate a starting point for our analysis. You need to add an appropriate design for analysis
+
+#removing outliers identified to clean and rerun analysis
+```{r}
+se1<- se[,se$tissue_type == "Liver"] ##change tissue type here
+
+se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+M_se<-se1[,se1$sex == "male"]
+#rm(F_se) #remove variable
+#rm(se1) #remove variable
+#test<-M_se #[ , !se1$animal_ID ==] #remove specific outliers here
+#colData(test)
+
+se1$group<-paste(se1$exposure, se1$sex, sep = "_") #create a group variable for easy comparison
+se1$group
+
+#se1 <- se1[ , order( colnames( se1 ) ) ]
+#head(assay(se1))
+#colData(se1)
+
+se1$group<-factor(se1$group)
+se1$group
+dds <- DESeqDataSet(M_se, 
+                    design = ~ exposure) #comparison done between high treatment and vehicle?
+```
+
+```{r}
+#dds$exposure<- factor(dds$exposure, levels = c("control","PCB"))
+
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+
+Now for visuals, plot a principal components analysis (PCA) using  ggplot2
+```{r}
+data <- plotPCA(vsd, 
+                  intgroup = 'exposure' , 
+                  returnData=TRUE)
+data
+percentVar <- round(100 * attr(data, 
+                                 "percentVar"))
+```
+#PCA Plot
+```{r}
+tiff(file = 'Figure/PCA/Male_Liver_PCA_outlier_removed.tiff', units="in", width=8, height=5, res=1000)
+PCA <-ggplot(data, aes(PC1, 
+                   PC2, 
+                   color=group,
+                   shape= group)) + 
+  stat_ellipse(aes(color= group))+
+  ggtitle("Male Liver PCA")+
+  geom_point(size=3) +
+  scale_color_manual(values = c("#666666", "#FF66CC","#66CCCC", "#9966FF")) +
+  scale_shape_manual(values = c(19, 15,17, 18)) +
+  xlab(paste0("PC1: ",
+              percentVar[1],
+              "% variance")) +
+  ylab(paste0("PC2: ",
+              percentVar[2],
+              "% variance"))+ 
+  theme_bw() + 
+  theme(panel.border =element_rect(colour = "black", fill=NA, size=1), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.line = element_line(colour = "black"))
+PCA
+dev.off()
+PCA
+```
+
+#***Differential Expression***
+Lets run a differential expression pipeline using the raw counts
+
+This function will print out a message for the various steps it performs. These are described in more detail in the manual page for DESeq, which can be accessed by typing ?DESeq. Briefly these are: the estimation of size factors (controlling for differences in the sequencing depth of the samples), the estimation of dispersion values for each gene, and fitting a generalized linear model.
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+How to assign actual gene names to our counts. Using an annotation package for mouse 
+```{r}
+res_exp$symbol <- mapIds(Mus.musculus, #which annotation package model to use
+                     keys=row.names(res_exp), #using rownames
+                     column="SYMBOL", #add a column of symbols associated with row.names arguments for the model
+                     keytype="ENSEMBL", #our rownames are gene id's 
+                     multiVals="first")
+```
+
+```{r}
+res_exp$ONTOLOGY <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ONTOLOGYALL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+res_exp$Genename <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="GENENAME", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+```{r}
+res_exp$ensembl <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENSEMBL", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+#***Plotting results***
+Heatmaps are a good way to visualize the most significant genes
+```{r}
+mat <- assay(vsd)[ head(order(res_exp$padj),
+                            30), #top 30 genes 
+                       ]
+#mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(vsd)[,
+                                     "exposure"])
+rownames(df)<-colnames(mat)
+colnames(df)[1]<- "Exposure"
+```
+
+```{r}
+tiff(file = "Figure/Male_Liver_heatmap.tiff", units="in", width=8, height=5, res=1000)
+heatmap<-pheatmap(mat, 
+         annotation_col=df,
+         labels_row = res_exp$symbol,
+         fontsize = 6,
+         scale = "row",
+         show_colnames = F,
+         cluster_cols = TRUE,
+         main = "Male Liver Heatmap")
+heatmap
+dev.off()
+heatmap
+```
+
+#***volcano plots***
+```{r}
+tiff(file = 'Figure/volcano/Male_Liver_volcano_plot.tiff', units="in", width=8, height=5, res=1000)
+M_vol1<- EnhancedVolcano(res_exp,
+    lab = res_exp$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = "Male Liver Volcano Plot",
+    subtitle = "",
+    ylim = c(0, -log10(10e-8)),
+    xlim = c(log2(10e-3), -log2(10e-3)),
+    FCcutoff = 1.0,
+    pCutoff = 0.05,
+    labSize = 3.0,
+    colAlpha = 1,
+    legendLabels=c('Not sig.','Log (base 2) FC','p-value',
+      'p-value & Log (base 2) FC'),
+    legendPosition = 'right',
+    legendLabSize = 12,
+    legendIconSize = 3.0,
+    gridlines.major = FALSE,
+    gridlines.minor = FALSE,
+    border = 'full',
+    borderWidth = 0.5,
+    borderColour = 'black')
+M_vol1
+dev.off()
+
+M_vol1
+```
+#Export TSV results
+
+```{r}
+exp_res <- as.data.frame(res_exp)
+write_tsv(exp_res, file="male_liver_results.tsv")
+write_csv(exp_res, file="male_liver_results.csv")
+write_csv(as.data.frame(assay(M_se)), file= "male_liver_counts.csv")
+```
+
+
+#REPEAT FOR FEMALES
+```{r}
+se1<- se[,se$tissue_type == "Liver"] ##change tissue type here
+
+se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+F_se<-se1[,se1$sex == "female"]
+
+#test<-M_se #[ , !se1$animal_ID ==] #remove specific outliers here
+#colData(test)
+
+se1$group<-paste(se1$exposure, se1$sex, sep = "_") #create a group variable for easy comparison
+se1$group
+
+#se1 <- se1[ , order( colnames( se1 ) ) ]
+#head(assay(se1))
+#colData(se1)
+
+se1$group<-factor(se1$group)
+se1$group
+dds <- DESeqDataSet(F_se, 
+                    design = ~ exposure) #comparison done between high treatment and vehicle?
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+
+Now for visuals, plot a principal components analysis (PCA) using  ggplot2
+```{r}
+data <- plotPCA(vsd, 
+                  intgroup = 'exposure' , 
+                  returnData=TRUE)
+data
+percentVar <- round(100 * attr(data, 
+                                 "percentVar"))
+```
+#PCA Plot
+```{r}
+tiff(file = 'Figure/PCA/Female_Liver_PCA_outlier_removed.tiff', units="in", width=8, height=5, res=1000)
+PCA <-ggplot(data, aes(PC1, 
+                   PC2, 
+                   color=group,
+                   shape= group)) + 
+  stat_ellipse(aes(color= group))+
+  ggtitle("Female Liver PCA")+
+  geom_point(size=3) +
+  scale_color_manual(values = c("#666666", "#FF66CC","#66CCCC", "#9966FF")) +
+  scale_shape_manual(values = c(19, 15,17, 18)) +
+  xlab(paste0("PC1: ",
+              percentVar[1],
+              "% variance")) +
+  ylab(paste0("PC2: ",
+              percentVar[2],
+              "% variance"))+ 
+  theme_bw() + 
+  theme(panel.border =element_rect(colour = "black", fill=NA, size=1), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.line = element_line(colour = "black"))
+PCA
+dev.off()
+PCA
+```
+
+#***Differential Expression***
+Lets run a differential expression pipeline using the raw counts
+
+This function will print out a message for the various steps it performs. These are described in more detail in the manual page for DESeq, which can be accessed by typing ?DESeq. Briefly these are: the estimation of size factors (controlling for differences in the sequencing depth of the samples), the estimation of dispersion values for each gene, and fitting a generalized linear model.
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+How to assign actual gene names to our counts. Using an annotation package for mouse 
+```{r}
+res_exp$symbol <- mapIds(Mus.musculus, #which annotation package model to use
+                     keys=row.names(res_exp), #using rownames
+                     column="SYMBOL", #add a column of symbols associated with row.names arguments for the model
+                     keytype="ENSEMBL", #our rownames are gene id's 
+                     multiVals="first")
+```
+
+```{r}
+res_exp$ONTOLOGY <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ONTOLOGYALL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+res_exp$Genename <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="GENENAME", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+```{r}
+res_exp$ensembl <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENSEMBL", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+#***Plotting results***
+Heatmaps are a good way to visualize the most significant genes
+```{r}
+mat <- assay(vsd)[ head(order(res_exp$padj),
+                            30), #top 30 genes 
+                       ]
+#mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(vsd)[,
+                                     "exposure"])
+rownames(df)<-colnames(mat)
+colnames(df)[1]<- "Exposure"
+```
+
+```{r}
+tiff(file = "Figure/Female_Liver_heatmap.tiff", units="in", width=8, height=5, res=1000)
+heatmap<-pheatmap(mat, 
+         annotation_col=df,
+         labels_row = res_exp$symbol,
+         fontsize = 6,
+         scale = "row",
+         show_colnames = F,
+         cluster_cols = TRUE,
+         main = "Female Liver Heatmap")
+heatmap
+dev.off()
+heatmap
+```
+
+#***volcano plots***
+```{r}
+tiff(file = 'Figure/volcano/Female_Liver_volcano_plot.tiff', units="in", width=8, height=5, res=1000)
+M_vol1<- EnhancedVolcano(res_exp,
+    lab = res_exp$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = "Female Liver Volcano Plot",
+    subtitle = "",
+    ylim = c(0, -log10(10e-8)),
+    xlim = c(log2(10e-3), -log2(10e-3)),
+    FCcutoff = 1.0,
+    pCutoff = 0.05,
+    labSize = 3.0,
+    colAlpha = 1,
+    legendLabels=c('Not sig.','Log (base 2) FC','p-value',
+      'p-value & Log (base 2) FC'),
+    legendPosition = 'right',
+    legendLabSize = 12,
+    legendIconSize = 3.0,
+    gridlines.major = FALSE,
+    gridlines.minor = FALSE,
+    border = 'full',
+    borderWidth = 0.5,
+    borderColour = 'black')
+M_vol1
+dev.off()
+
+M_vol1
+```
+#Export TSV results
+
+```{r}
+exp_res <- as.data.frame(res_exp)
+write_tsv(exp_res, file="female_liver_results.tsv")
+write_csv(exp_res, file="female_liver_results.csv")
+write_csv(as.data.frame(assay(M_se)), file= "female_liver_counts.csv")
+```
+
+#Repeat for Hippocampus Male
+```{r}
+se1<- se[,se$tissue_type == "Dorsal Hippocampus"] ##change tissue type here
+
+#se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+M_se<-se1[,se1$sex == "male"]
+#rm(F_se) #remove variable
+#rm(se1) #remove variable
+#test<-M_se #[ , !se1$animal_ID ==] #remove specific outliers here
+#colData(test)
+
+se1$group<-paste(se1$exposure, se1$sex, sep = "_") #create a group variable for easy comparison
+se1$group
+
+#se1 <- se1[ , order( colnames( se1 ) ) ]
+#head(assay(se1))
+#colData(se1)
+
+se1$group<-factor(se1$group)
+se1$group
+dds <- DESeqDataSet(M_se, 
+                    design = ~ exposure) #comparison done between high treatment and vehicle?
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+
+Now for visuals, plot a principal components analysis (PCA) using  ggplot2
+```{r}
+data <- plotPCA(vsd, 
+                  intgroup = 'exposure' , 
+                  returnData=TRUE)
+data
+percentVar <- round(100 * attr(data, 
+                                 "percentVar"))
+```
+#PCA Plot
+```{r}
+tiff(file = 'Figure/PCA/Male_Dorsal_Hippocampus_PCA_outlier_removed.tiff', units="in", width=8, height=5, res=1000)
+PCA <-ggplot(data, aes(PC1, 
+                   PC2, 
+                   color=group,
+                   shape= group)) + 
+  stat_ellipse(aes(color= group))+
+  ggtitle("Male Dorsal Hippocampus PCA")+
+  geom_point(size=3) +
+  scale_color_manual(values = c("#666666", "#FF66CC","#66CCCC", "#9966FF")) +
+  scale_shape_manual(values = c(19, 15,17, 18)) +
+  xlab(paste0("PC1: ",
+              percentVar[1],
+              "% variance")) +
+  ylab(paste0("PC2: ",
+              percentVar[2],
+              "% variance"))+ 
+  theme_bw() + 
+  theme(panel.border =element_rect(colour = "black", fill=NA, size=1), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.line = element_line(colour = "black"))
+PCA
+dev.off()
+PCA
+```
+
+#***Differential Expression***
+Lets run a differential expression pipeline using the raw counts
+
+This function will print out a message for the various steps it performs. These are described in more detail in the manual page for DESeq, which can be accessed by typing ?DESeq. Briefly these are: the estimation of size factors (controlling for differences in the sequencing depth of the samples), the estimation of dispersion values for each gene, and fitting a generalized linear model.
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+How to assign actual gene names to our counts. Using an annotation package for mouse 
+```{r}
+res_exp$symbol <- mapIds(Mus.musculus, #which annotation package model to use
+                     keys=row.names(res_exp), #using rownames
+                     column="SYMBOL", #add a column of symbols associated with row.names arguments for the model
+                     keytype="ENSEMBL", #our rownames are gene id's 
+                     multiVals="first")
+```
+
+```{r}
+res_exp$ONTOLOGY <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ONTOLOGYALL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+res_exp$Genename <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="GENENAME", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+```{r}
+res_exp$ensembl <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENSEMBL", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+#***Plotting results***
+Heatmaps are a good way to visualize the most significant genes
+```{r}
+mat <- assay(vsd)[ head(order(res_exp$padj),
+                            30), #top 30 genes 
+                       ]
+#mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(vsd)[,
+                                     "exposure"])
+rownames(df)<-colnames(mat)
+colnames(df)[1]<- "Exposure"
+```
+
+```{r}
+tiff(file = "Figure/Male_Dorsal_Hippocampus_heatmap.tiff", units="in", width=8, height=5, res=1000)
+heatmap<-pheatmap(mat, 
+         annotation_col=df,
+         labels_row = res_exp$symbol,
+         fontsize = 6,
+         scale = "row",
+         show_colnames = F,
+         cluster_cols = TRUE,
+         main = "Male Dorsal Hippocampus Heatmap")
+heatmap
+dev.off()
+heatmap
+```
+
+#***volcano plots***
+```{r}
+tiff(file = 'Figure/volcano/Male_Dorsal Hippocampus_volcano_plot.tiff', units="in", width=8, height=5, res=1000)
+M_vol1<- EnhancedVolcano(res_exp,
+    lab = res_exp$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = "Male Dorsal Hippocampus Volcano Plot",
+    subtitle = "",
+    ylim = c(0, -log10(10e-8)),
+    xlim = c(log2(10e-3), -log2(10e-3)),
+    FCcutoff = 1.0,
+    pCutoff = 0.05,
+    labSize = 3.0,
+    colAlpha = 1,
+    legendLabels=c('Not sig.','Log (base 2) FC','p-value',
+      'p-value & Log (base 2) FC'),
+    legendPosition = 'right',
+    legendLabSize = 12,
+    legendIconSize = 3.0,
+    gridlines.major = FALSE,
+    gridlines.minor = FALSE,
+    border = 'full',
+    borderWidth = 0.5,
+    borderColour = 'black')
+M_vol1
+dev.off()
+
+M_vol1
+```
+#Export TSV results
+
+```{r}
+exp_res <- as.data.frame(res_exp)
+write_tsv(exp_res, file="male_hippocampus_results.tsv")
+write_csv(exp_res, file="male_hippocampus_results.csv")
+write_csv(as.data.frame(assay(M_se)), file= "male_hippocampus_counts.csv")
+```
+
+
+#REPEAT FOR FEMALES
+```{r}
+se1<- se[,se$tissue_type == "Dorsal Hippocampus"] ##change tissue type here
+
+#se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+F_se<-se1[,se1$sex == "female"]
+
+#test<-M_se #[ , !se1$animal_ID ==] #remove specific outliers here
+#colData(test)
+
+se1$group<-paste(se1$exposure, se1$sex, sep = "_") #create a group variable for easy comparison
+se1$group
+
+#se1 <- se1[ , order( colnames( se1 ) ) ]
+#head(assay(se1))
+#colData(se1)
+
+se1$group<-factor(se1$group)
+se1$group
+dds <- DESeqDataSet(F_se, 
+                    design = ~ exposure) #comparison done between high treatment and vehicle?
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+
+Now for visuals, plot a principal components analysis (PCA) using  ggplot2
+```{r}
+data <- plotPCA(vsd, 
+                  intgroup = 'exposure' , 
+                  returnData=TRUE)
+data
+percentVar <- round(100 * attr(data, 
+                                 "percentVar"))
+```
+#PCA Plot
+```{r}
+tiff(file = 'Figure/PCA/Female_Dorsal_Hippocampus_PCA_outlier_removed.tiff', units="in", width=8, height=5, res=1000)
+PCA <-ggplot(data, aes(PC1, 
+                   PC2, 
+                   color=group,
+                   shape= group)) + 
+  stat_ellipse(aes(color= group))+
+  ggtitle("Female Dorsal Hippocampus PCA")+
+  geom_point(size=3) +
+  scale_color_manual(values = c("#666666", "#FF66CC","#66CCCC", "#9966FF")) +
+  scale_shape_manual(values = c(19, 15,17, 18)) +
+  xlab(paste0("PC1: ",
+              percentVar[1],
+              "% variance")) +
+  ylab(paste0("PC2: ",
+              percentVar[2],
+              "% variance"))+ 
+  theme_bw() + 
+  theme(panel.border =element_rect(colour = "black", fill=NA, size=1), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.line = element_line(colour = "black"))
+PCA
+dev.off()
+PCA
+```
+
+#***Differential Expression***
+Lets run a differential expression pipeline using the raw counts
+
+This function will print out a message for the various steps it performs. These are described in more detail in the manual page for DESeq, which can be accessed by typing ?DESeq. Briefly these are: the estimation of size factors (controlling for differences in the sequencing depth of the samples), the estimation of dispersion values for each gene, and fitting a generalized linear model.
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+How to assign actual gene names to our counts. Using an annotation package for mouse 
+```{r}
+res_exp$symbol <- mapIds(Mus.musculus, #which annotation package model to use
+                     keys=row.names(res_exp), #using rownames
+                     column="SYMBOL", #add a column of symbols associated with row.names arguments for the model
+                     keytype="ENSEMBL", #our rownames are gene id's 
+                     multiVals="first")
+```
+
+```{r}
+res_exp$ONTOLOGY <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ONTOLOGYALL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+res_exp$Genename <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="GENENAME", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+```{r}
+res_exp$ensembl <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENSEMBL", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+
+#***Plotting results***
+Heatmaps are a good way to visualize the most significant genes
+```{r}
+mat <- assay(vsd)[ head(order(res_exp$padj),
+                            30), #top 30 genes 
+                       ]
+#mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(vsd)[,
+                                     "exposure"])
+rownames(df)<-colnames(mat)
+colnames(df)[1]<- "Exposure"
+```
+
+```{r}
+tiff(file = "Figure/Female_Dorsal_Hippocampus_heatmap.tiff", units="in", width=8, height=5, res=1000)
+heatmap<-pheatmap(mat, 
+         annotation_col=df,
+         labels_row = res_exp$symbol,
+         fontsize = 6,
+         scale = "row",
+         show_colnames = F,
+         cluster_cols = TRUE,
+         main = "Female Dorsal Hippocampus Heatmap")
+heatmap
+dev.off()
+heatmap
+```
+
+#***volcano plots***
+```{r}
+tiff(file = 'Figure/volcano/Female_Dorsal_Hippocampus_volcano_plot.tiff', units="in", width=8, height=5, res=1000)
+M_vol1<- EnhancedVolcano(res_exp,
+    lab = res_exp$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = "Female Dorsal Hippocampus Volcano Plot",
+    subtitle = "",
+    ylim = c(0, -log10(10e-8)),
+    xlim = c(log2(10e-3), -log2(10e-3)),
+    FCcutoff = 1.0,
+    pCutoff = 0.05,
+    labSize = 3.0,
+    colAlpha = 1,
+    legendLabels=c('Not sig.','Log (base 2) FC','p-value',
+      'p-value & Log (base 2) FC'),
+    legendPosition = 'right',
+    legendLabSize = 12,
+    legendIconSize = 3.0,
+    gridlines.major = FALSE,
+    gridlines.minor = FALSE,
+    border = 'full',
+    borderWidth = 0.5,
+    borderColour = 'black')
+M_vol1
+dev.off()
+
+M_vol1
+```
+#Export TSV results
+
+```{r}
+exp_res <- as.data.frame(res_exp)
+write_tsv(exp_res, file="female_hippocampus_results.tsv")
+write_csv(exp_res, file="female_hippocampus_results.csv")
+write_csv(as.data.frame(assay(M_se)), file= "female_hippocampus_counts.csv")
+```
+
+----------------------------------------------------
+
+
+```{r}
+tiff(file = 'Figures/volcano/Female_pair_fed_volcano_plot_hipp.tiff', units="in", width=8, height=5, res=1000)
+M_vol1<- EnhancedVolcano(res_pf,
+    lab = res_pf$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = "Female Hippocampus",
+    subtitle = "Pair Fed ",
+    ylim = c(0, -log10(10e-8)),
+    xlim = c(log2(10e-3), -log2(10e-3)),
+    FCcutoff = 1.0,
+    pCutoff = 0.05,
+    labSize = 3.0,
+    colAlpha = 1,
+    legendLabels=c('Not sig.','Log (base 2) FC','p-value',
+      'p-value & Log (base 2) FC'),
+    legendPosition = 'right',
+    legendLabSize = 12,
+    legendIconSize = 3.0,
+    gridlines.major = FALSE,
+    gridlines.minor = FALSE,
+    border = 'full',
+    borderWidth = 0.5,
+    borderColour = 'black')
+M_vol1
+dev.off()
+
+M_vol1
+```
+
+```{r}
+pf_resOrdered <- as.data.frame(pf_resOrdered)
+write_tsv(pf_resOrdered, file="Results_spreadsheets/Female_pf_Hipp_results.tsv")
+write_csv(pf_resOrdered, file="Results_spreadsheets/Female_pf_Hipp_results.csv")
+```
+
+
+---------------
+
+#**gene enrichment analysis (GSEA)**
+
+#Female
+```{r}
+x<- res_exp[order(res_exp$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
+x<-na.omit(x)
+
+gene_list<-x$log2FoldChange
+g_list<-data.frame(gene_list)
+colnames(g_list)<-"LFC"
+
+g_list$entrez<-x$ENTREZID
+
+
+hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
+
+DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
+
+#rename the listed Fold changes for the genes with the human equivalent for DO
+genes1<-DO_data$LFC
+names(genes1)<-DO_data$human_entrez
+genes1<-genes1[order(genes1, decreasing=TRUE)]
+head(genes1,10)
+```
+
+```{r}
+x<- res_pf[order(res_pf$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
+x<-na.omit(x)
+
+gene_list<-x$log2FoldChange
+g_list<-data.frame(gene_list)
+colnames(g_list)<-"LFC"
+
+g_list$entrez<-x$ENTREZID
+
+
+hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
+
+DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
+
+#rename the listed Fold changes for the genes with the human equivalent for DO
+genes2<-DO_data$LFC
+names(genes2)<-DO_data$human_entrez
+genes2<-genes2[order(genes2, decreasing=TRUE)]
+head(genes2,10)
+```
+
+#Compare Cluster
+###Gene
+```{r}
+inputList <- list(`Exposed` = genes1, `Pair-Fed` = genes2 )
+groups <- compareCluster(geneClusters=inputList,  fun = "gseGO", OrgDb=org.Hs.eg.db, pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figures/Enrichment/Grouped_female_Hipp_Gene_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figures/Enrichment/Female_Hipp_grouped_gene_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot34<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 11), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 13),
+        axis.text.x = element_text(size = 14),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot34
+dev.off()
+dot34
+```
+
+###KEGG
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseKEGG", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+
+data<-data.frame(groups)
+write.csv(data ,file="Figures/Enrichment/Female_Grouped_Hipp_KEGG_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figures/Enrichment/Female_Hipp_grouped_kegg_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot28<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 13), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot28
+dev.off()
+dot28
+```
+
+
+###Disease Ontology
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseDO", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figures/Enrichment/Grouped_Female_Hipp_Disease_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figures/Enrichment/Female_hipp_grouped_disease_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot32<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 12), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot32
+dev.off()
+dot32
+```
+
+##Hippocampus
+```{r}
+big<- dot34/dot28/dot32
+
+
+tiff(file = 'Figures/dot_plots_big.tiff', units="in",width=10, height=15, res=500)
+big + plot_annotation(tag_levels = 'A') & 
+  theme(plot.tag = element_text(size = 16, vjust = -10))
+dev.off()
+
+```
+
+
+
+#plotting individual genes of interest
+Using normalized counts (prebuilt into DESEQ2) which normalizes counts by the estimated size factors (or normalization factors if these were used) and adds a pseudocount of 1/2 to allow for log scale plotting.
+**drug metabolizing enzymes**
+```{r}
+top_gene<-read.csv("gene_list_drug_metabolizing_kegg_CRBLM.csv", header = FALSE)
+top_gene<-as.character(top_gene$V1)
+
+setdiff(top_gene,rownames(counts(dds))) #check if all genes of interest can be found in the rownames of the deseq object --> if not you will not be able to run the block of code. Character(0) or integer(0) is a what you want to see
+```
+```{r}
+stat.test<-read.csv("CRBLM_FDR.csv")
+stat.test$symbol<-factor(stat.test$symbol)
+stat.test$group2<-as.factor(stat.test$group2)
+stat.test$group1<-as.factor(stat.test$group1)
+stat.test
+```
+
+```{r}
+data_1 <- split(as.tibble(stat.test[,2:4]), as.factor(stat.test$symbol))
+```
+
+
+```{r message=FALSE}
+plot_list<-list()
+for (i in unique(1:length(top_gene))){
+  gene <- top_gene[i]
+  b<- plotCounts(dds, gene = gene, intgroup = "exposure",normalized = TRUE, returnData = TRUE)
+  z = max(b$count) + (max(b$count)*0.05)
+  d <- ggplot(b, aes(factor(exposure), count))+
+    geom_violin(mapping = aes(x = exposure, 
+                              y = count, 
+                              fill = exposure))+
+    #adding jitter to avoid overplotting
+    geom_point(mapping = aes(x = exposure, 
+                             y = count, 
+                             fill = exposure, 
+                             shape= exposure), 
+               size = 5, position = position_jitter(width = 0.3, height=0))+ 
+    scale_y_continuous(expand = c(0,0) , limits = c(0,z+z*0.4)) +
+    stat_summary(mapping = aes(x = exposure, y = count), 
+                 geom = 'crossbar', 
+                 fun= 'mean', 
+                 colour = 'black', 
+                 width=0.2)+
+    scale_fill_manual(values = c("#666666", "#FF66CC","#66CCCC","#9966FF")) +
+    scale_shape_manual(values = c(19, 15,17,18)) +
+  labs(x = NULL, y = "Normalized counts")+ # changes the y axis label, removes x axis label
+  theme_classic(base_size = 20)+# changes the overall style of the plot
+  ggtitle(paste0(res_low$symbol[gene])) +
+  theme(
+    axis.text.x = element_text(colour = "black"),
+    axis.text.y = element_text(colour = "black"))+
+  stat_pvalue_manual(data_1[[i]], 
+    y.position = z, step.increase = 0.2,
+    label = "p = {scales::pvalue(p.adj)}", hide.ns = TRUE
+    )
+  plot_list[[gene]] <- d
+}
+
+head(plot_list)
+```
+
+
+```{r warning=FALSE}
+# Export into pdf: display multiple plots on the same page
+ggexport(
+  plotlist = plot_list, filename = "Figures/male_CRBLM_cyp_plot.pdf", 
+  ncol = 1, nrow = 1, height = 7, width = 7, res = 600,pointsize = 8
+)
+```
+
