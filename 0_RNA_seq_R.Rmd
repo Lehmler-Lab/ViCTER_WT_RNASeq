@@ -84,13 +84,13 @@ We can now construct a DESeqDataSet object to formulate a starting point for our
 
 #removing outliers identified to clean and rerun analysis
 ```{r}
-se1<- se[,se$tissue_type == "Liver"] ##change tissue type here
+se1<- se[,se$tissue_type == "Dorsal Hippocampus"] ##change tissue type here
 
 se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
 
 se1 <- se1[rowSums(assay(se1)) >= 10, ]
 
-M_se<-se1[,se1$sex == "male"]
+#M_se<-se1[,se1$sex == "male"]
 #rm(F_se) #remove variable
 #rm(se1) #remove variable
 #test<-M_se #[ , !se1$animal_ID ==] #remove specific outliers here
@@ -105,8 +105,8 @@ se1$group
 
 se1$group<-factor(se1$group)
 se1$group
-dds <- DESeqDataSet(M_se, 
-                    design = ~ exposure) #comparison done between high treatment and vehicle?
+dds <- DESeqDataSet(se1, 
+                    design = ~ group) #comparison done between high treatment and vehicle?
 ```
 
 ```{r}
@@ -128,7 +128,7 @@ vsd <- vst(dds)
 Now for visuals, plot a principal components analysis (PCA) using  ggplot2
 ```{r}
 data <- plotPCA(vsd, 
-                  intgroup = 'exposure' , 
+                  intgroup = 'group' , 
                   returnData=TRUE)
 data
 percentVar <- round(100 * attr(data, 
@@ -136,13 +136,13 @@ percentVar <- round(100 * attr(data,
 ```
 #PCA Plot
 ```{r}
-tiff(file = 'Figure/PCA/Male_Liver_PCA_outlier_removed.tiff', units="in", width=8, height=5, res=1000)
+tiff(file = 'Figure/PCA/Hippocampus_PCA.tiff', units="in", width=8, height=5, res=1000)
 PCA <-ggplot(data, aes(PC1, 
                    PC2, 
                    color=group,
                    shape= group)) + 
   stat_ellipse(aes(color= group))+
-  ggtitle("Male Liver PCA")+
+  ggtitle("Hippocampus PCA")+
   geom_point(size=3) +
   scale_color_manual(values = c("#666666", "#FF66CC","#66CCCC", "#9966FF")) +
   scale_shape_manual(values = c(19, 15,17, 18)) +
@@ -915,268 +915,5 @@ write_csv(exp_res, file="female_hippocampus_results.csv")
 write_csv(as.data.frame(assay(M_se)), file= "female_hippocampus_counts.csv")
 ```
 
-----------------------------------------------------
 
-
-```{r}
-tiff(file = 'Figures/volcano/Female_pair_fed_volcano_plot_hipp.tiff', units="in", width=8, height=5, res=1000)
-M_vol1<- EnhancedVolcano(res_pf,
-    lab = res_pf$symbol,
-    x = 'log2FoldChange',
-    y = 'pvalue',
-    title = "Female Hippocampus",
-    subtitle = "Pair Fed ",
-    ylim = c(0, -log10(10e-8)),
-    xlim = c(log2(10e-3), -log2(10e-3)),
-    FCcutoff = 1.0,
-    pCutoff = 0.05,
-    labSize = 3.0,
-    colAlpha = 1,
-    legendLabels=c('Not sig.','Log (base 2) FC','p-value',
-      'p-value & Log (base 2) FC'),
-    legendPosition = 'right',
-    legendLabSize = 12,
-    legendIconSize = 3.0,
-    gridlines.major = FALSE,
-    gridlines.minor = FALSE,
-    border = 'full',
-    borderWidth = 0.5,
-    borderColour = 'black')
-M_vol1
-dev.off()
-
-M_vol1
-```
-
-```{r}
-pf_resOrdered <- as.data.frame(pf_resOrdered)
-write_tsv(pf_resOrdered, file="Results_spreadsheets/Female_pf_Hipp_results.tsv")
-write_csv(pf_resOrdered, file="Results_spreadsheets/Female_pf_Hipp_results.csv")
-```
-
-
----------------
-
-#**gene enrichment analysis (GSEA)**
-
-#Female
-```{r}
-x<- res_exp[order(res_exp$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
-x<-na.omit(x)
-
-gene_list<-x$log2FoldChange
-g_list<-data.frame(gene_list)
-colnames(g_list)<-"LFC"
-
-g_list$entrez<-x$ENTREZID
-
-
-hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
-
-DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
-
-#rename the listed Fold changes for the genes with the human equivalent for DO
-genes1<-DO_data$LFC
-names(genes1)<-DO_data$human_entrez
-genes1<-genes1[order(genes1, decreasing=TRUE)]
-head(genes1,10)
-```
-
-```{r}
-x<- res_pf[order(res_pf$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
-x<-na.omit(x)
-
-gene_list<-x$log2FoldChange
-g_list<-data.frame(gene_list)
-colnames(g_list)<-"LFC"
-
-g_list$entrez<-x$ENTREZID
-
-
-hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
-
-DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
-
-#rename the listed Fold changes for the genes with the human equivalent for DO
-genes2<-DO_data$LFC
-names(genes2)<-DO_data$human_entrez
-genes2<-genes2[order(genes2, decreasing=TRUE)]
-head(genes2,10)
-```
-
-#Compare Cluster
-###Gene
-```{r}
-inputList <- list(`Exposed` = genes1, `Pair-Fed` = genes2 )
-groups <- compareCluster(geneClusters=inputList,  fun = "gseGO", OrgDb=org.Hs.eg.db, pvalueCutoff = 0.05, pAdjustMethod = "none")
-
-data<-data.frame(groups)
-write.csv(data ,file="Figures/Enrichment/Grouped_female_Hipp_Gene_enrichment.csv")
-```
-
-
-```{r}
-tiff(file = 'Figures/Enrichment/Female_Hipp_grouped_gene_enrichment.tiff', units="in", width=8, height=5, res=1000)
-dot34<-dotplot(groups,showCategory=3, split=".sign") +
-  geom_point(shape = 1,colour = "black") +
-  scale_color_viridis(option = "inferno", direction = -1) +
-  facet_grid(.~.sign)+
-  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
-  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
-  theme(axis.text.y = element_text(size = 11), 
-        strip.background = element_blank(),
-        strip.text.x = element_text(size = 13),
-        axis.text.x = element_text(size = 14),
-        axis.title.x = element_blank(),
-        legend.text = element_text(size = 10),
-        legend.key.width= unit(0.3, 'cm'))  
-dot34
-dev.off()
-dot34
-```
-
-###KEGG
-```{r}
-groups <- compareCluster(geneClusters=inputList,  fun = "gseKEGG", pvalueCutoff = 0.05, pAdjustMethod = "none")
-
-
-data<-data.frame(groups)
-write.csv(data ,file="Figures/Enrichment/Female_Grouped_Hipp_KEGG_enrichment.csv")
-```
-
-
-```{r}
-tiff(file = 'Figures/Enrichment/Female_Hipp_grouped_kegg_enrichment.tiff', units="in", width=8, height=5, res=1000)
-dot28<-dotplot(groups,showCategory=3, split=".sign") +
-  geom_point(shape = 1,colour = "black") +
-  scale_color_viridis(option = "inferno", direction = -1) +
-  facet_grid(.~.sign)+
-  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
-  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
-  theme(axis.text.y = element_text(size = 13), 
-        strip.background = element_blank(),
-        strip.text.x = element_text(size = 14),
-        axis.text.x = element_text(size = 12),
-        axis.title.x = element_blank(),
-        legend.text = element_text(size = 10),
-        legend.key.width= unit(0.3, 'cm'))  
-dot28
-dev.off()
-dot28
-```
-
-
-###Disease Ontology
-```{r}
-groups <- compareCluster(geneClusters=inputList,  fun = "gseDO", pvalueCutoff = 0.05, pAdjustMethod = "none")
-
-data<-data.frame(groups)
-write.csv(data ,file="Figures/Enrichment/Grouped_Female_Hipp_Disease_enrichment.csv")
-```
-
-
-```{r}
-tiff(file = 'Figures/Enrichment/Female_hipp_grouped_disease_enrichment.tiff', units="in", width=8, height=5, res=1000)
-dot32<-dotplot(groups,showCategory=3, split=".sign") +
-  geom_point(shape = 1,colour = "black") +
-  scale_color_viridis(option = "inferno", direction = -1) +
-  facet_grid(.~.sign)+
-  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
-  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
-  theme(axis.text.y = element_text(size = 12), 
-        strip.background = element_blank(),
-        strip.text.x = element_text(size = 14),
-        axis.text.x = element_text(size = 12),
-        axis.title.x = element_blank(),
-        legend.text = element_text(size = 10),
-        legend.key.width= unit(0.3, 'cm'))  
-dot32
-dev.off()
-dot32
-```
-
-##Hippocampus
-```{r}
-big<- dot34/dot28/dot32
-
-
-tiff(file = 'Figures/dot_plots_big.tiff', units="in",width=10, height=15, res=500)
-big + plot_annotation(tag_levels = 'A') & 
-  theme(plot.tag = element_text(size = 16, vjust = -10))
-dev.off()
-
-```
-
-
-
-#plotting individual genes of interest
-Using normalized counts (prebuilt into DESEQ2) which normalizes counts by the estimated size factors (or normalization factors if these were used) and adds a pseudocount of 1/2 to allow for log scale plotting.
-**drug metabolizing enzymes**
-```{r}
-top_gene<-read.csv("gene_list_drug_metabolizing_kegg_CRBLM.csv", header = FALSE)
-top_gene<-as.character(top_gene$V1)
-
-setdiff(top_gene,rownames(counts(dds))) #check if all genes of interest can be found in the rownames of the deseq object --> if not you will not be able to run the block of code. Character(0) or integer(0) is a what you want to see
-```
-```{r}
-stat.test<-read.csv("CRBLM_FDR.csv")
-stat.test$symbol<-factor(stat.test$symbol)
-stat.test$group2<-as.factor(stat.test$group2)
-stat.test$group1<-as.factor(stat.test$group1)
-stat.test
-```
-
-```{r}
-data_1 <- split(as.tibble(stat.test[,2:4]), as.factor(stat.test$symbol))
-```
-
-
-```{r message=FALSE}
-plot_list<-list()
-for (i in unique(1:length(top_gene))){
-  gene <- top_gene[i]
-  b<- plotCounts(dds, gene = gene, intgroup = "exposure",normalized = TRUE, returnData = TRUE)
-  z = max(b$count) + (max(b$count)*0.05)
-  d <- ggplot(b, aes(factor(exposure), count))+
-    geom_violin(mapping = aes(x = exposure, 
-                              y = count, 
-                              fill = exposure))+
-    #adding jitter to avoid overplotting
-    geom_point(mapping = aes(x = exposure, 
-                             y = count, 
-                             fill = exposure, 
-                             shape= exposure), 
-               size = 5, position = position_jitter(width = 0.3, height=0))+ 
-    scale_y_continuous(expand = c(0,0) , limits = c(0,z+z*0.4)) +
-    stat_summary(mapping = aes(x = exposure, y = count), 
-                 geom = 'crossbar', 
-                 fun= 'mean', 
-                 colour = 'black', 
-                 width=0.2)+
-    scale_fill_manual(values = c("#666666", "#FF66CC","#66CCCC","#9966FF")) +
-    scale_shape_manual(values = c(19, 15,17,18)) +
-  labs(x = NULL, y = "Normalized counts")+ # changes the y axis label, removes x axis label
-  theme_classic(base_size = 20)+# changes the overall style of the plot
-  ggtitle(paste0(res_low$symbol[gene])) +
-  theme(
-    axis.text.x = element_text(colour = "black"),
-    axis.text.y = element_text(colour = "black"))+
-  stat_pvalue_manual(data_1[[i]], 
-    y.position = z, step.increase = 0.2,
-    label = "p = {scales::pvalue(p.adj)}", hide.ns = TRUE
-    )
-  plot_list[[gene]] <- d
-}
-
-head(plot_list)
-```
-
-
-```{r warning=FALSE}
-# Export into pdf: display multiple plots on the same page
-ggexport(
-  plotlist = plot_list, filename = "Figures/male_CRBLM_cyp_plot.pdf", 
-  ncol = 1, nrow = 1, height = 7, width = 7, res = 600,pointsize = 8
-)
-```
 

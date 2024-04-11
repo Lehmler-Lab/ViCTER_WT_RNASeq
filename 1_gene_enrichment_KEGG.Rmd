@@ -1,0 +1,657 @@
+#**gene enrichment analysis (GSEA)**
+
+#Female Liver
+```{r}
+se1<- se[,se$tissue_type == "Liver"] ##change tissue type here
+
+se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+F_se<-se1[,se1$sex == "female"]
+
+dds <- DESeqDataSet(F_se, 
+                    design = ~ exposure) #comparison done between treatment and vehicle?
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+x<- res_exp[order(res_exp$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
+x<-na.omit(x)
+
+gene_list<-x$log2FoldChange
+g_list<-data.frame(gene_list)
+colnames(g_list)<-"LFC"
+
+g_list$entrez<-x$ENTREZID
+
+
+hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
+
+DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
+
+#rename the listed Fold changes for the genes with the human equivalent for DO
+genes1<-DO_data$LFC
+names(genes1)<-DO_data$human_entrez
+genes1<-genes1[order(genes1, decreasing=TRUE)]
+head(genes1,10)
+```
+
+#Compare Cluster
+###Gene
+```{r}
+inputList <- list(`Exposed` = genes1)
+groups <- compareCluster(geneClusters=inputList,  fun = "gseGO", OrgDb=org.Hs.eg.db, pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/female_Liver_Gene_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/Female_Liver_grouped_gene_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot34<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 11), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 13),
+        axis.text.x = element_text(size = 14),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot34
+dev.off()
+dot34
+```
+
+###KEGG
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseKEGG", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/Female_Liver_KEGG_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/Female_Liver_kegg_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot28<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 13), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot28
+dev.off()
+dot28
+```
+
+
+###Disease Ontology
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseDO", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/Female_Liver_Disease_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/Female_Liver_disease_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot32<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 12), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot32
+dev.off()
+dot32
+```
+#Male Liver
+```{r}
+se1<- se[,se$tissue_type == "Liver"] ##change tissue type here
+
+se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+m_se<-se1[,se1$sex == "male"]
+
+dds <- DESeqDataSet(m_se, 
+                    design = ~ exposure) #comparison done between treatment and vehicle?
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+x<- res_exp[order(res_exp$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
+x<-na.omit(x)
+
+gene_list<-x$log2FoldChange
+g_list<-data.frame(gene_list)
+colnames(g_list)<-"LFC"
+
+g_list$entrez<-x$ENTREZID
+
+
+hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
+
+DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
+
+#rename the listed Fold changes for the genes with the human equivalent for DO
+genes1<-DO_data$LFC
+names(genes1)<-DO_data$human_entrez
+genes1<-genes1[order(genes1, decreasing=TRUE)]
+head(genes1,10)
+```
+
+#Compare Cluster
+###Gene
+```{r}
+inputList <- list(`Exposed` = genes1)
+groups <- compareCluster(geneClusters=inputList,  fun = "gseGO", OrgDb=org.Hs.eg.db, pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/male_Liver_Gene_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/male_Liver_grouped_gene_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot34<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 11), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 13),
+        axis.text.x = element_text(size = 14),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot34
+dev.off()
+dot34
+```
+
+###KEGG
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseKEGG", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/male_Liver_KEGG_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/male_Liver_kegg_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot28<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 13), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot28
+dev.off()
+dot28
+```
+
+
+###Disease Ontology
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseDO", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/male_Liver_Disease_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/male_Liver_disease_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot32<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 12), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot32
+dev.off()
+dot32
+```
+#Female Hippocampus
+```{r}
+se1<- se[,se$tissue_type == "Dorsal Hippocampus"] ##change tissue type here
+
+se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+F_se<-se1[,se1$sex == "female"]
+
+dds <- DESeqDataSet(F_se, 
+                    design = ~ exposure) #comparison done between treatment and vehicle?
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+x<- res_exp[order(res_exp$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
+x<-na.omit(x)
+
+gene_list<-x$log2FoldChange
+g_list<-data.frame(gene_list)
+colnames(g_list)<-"LFC"
+
+g_list$entrez<-x$ENTREZID
+
+
+hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
+
+DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
+
+#rename the listed Fold changes for the genes with the human equivalent for DO
+genes1<-DO_data$LFC
+names(genes1)<-DO_data$human_entrez
+genes1<-genes1[order(genes1, decreasing=TRUE)]
+head(genes1,10)
+```
+
+#Compare Cluster
+###Gene
+```{r}
+inputList <- list(`Exposed` = genes1)
+groups <- compareCluster(geneClusters=inputList,  fun = "gseGO", OrgDb=org.Hs.eg.db, pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/female_Hipp_Gene_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/Female_Hipp_gene_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot34<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 11), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 13),
+        axis.text.x = element_text(size = 14),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot34
+dev.off()
+dot34
+```
+
+###KEGG
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseKEGG", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/Female_Hipp_KEGG_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/Female_Hipp_kegg_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot28<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 13), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot28
+dev.off()
+dot28
+```
+
+
+###Disease Ontology
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseDO", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/Female_Hipp_Disease_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/Female_Hipp_disease_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot32<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 12), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot32
+dev.off()
+dot32
+```
+
+#Male Hippocampus
+```{r}
+se1<- se[,se$tissue_type == "Dorsal Hippocampus"] ##change tissue type here
+
+se1<-se1[ , !se1$bam_ID == c("Li21.bam")] #remove specific outliers here
+
+se1 <- se1[rowSums(assay(se1)) >= 10, ]
+
+m_se<-se1[,se1$sex == "male"]
+
+dds <- DESeqDataSet(F_se, 
+                    design = ~ exposure) #comparison done between treatment and vehicle?
+```
+
+
+#***Exploratory analysis and visualization***
+*transformations*
+The variance stabilizing transformation (VST) a goal of stablizing the variance across the range of values. produce log2-like values for high counts. 
+```{r}
+colData(dds)
+
+vsd <- vst(dds)
+```
+
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+Calling results without any arguments will extract the estimated log2 fold changes and p values for the last variable in the design formula. If there are more than 2 levels for this variable, results will extract the results table for a comparison of the last level over the first level. Treatment 6 vs vehicle
+```{r}
+res_exp<-results(dds, name = "exposure_PCB_vs_control")
+
+res_exp
+
+summary(res_exp)
+```
+
+#***Annotating results***
+```{r}
+columns(Mus.musculus)
+```
+
+
+```{r}
+res_exp$ENTREZID <- mapIds(Mus.musculus,
+                     keys=row.names(res_exp),
+                     column="ENTREZID", #now add a column for gene names or gene description
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+x<- res_exp[order(res_exp$log2FoldChange, decreasing = TRUE),]  #reorder the genes based on significance
+x<-na.omit(x)
+
+gene_list<-x$log2FoldChange
+g_list<-data.frame(gene_list)
+colnames(g_list)<-"LFC"
+
+g_list$entrez<-x$ENTREZID
+
+
+hum_orthos<- orthologs(genes = g_list$entrez, species = "mouse", human = FALSE)
+
+DO_data<-merge(g_list, hum_orthos, by.x = "entrez", by.y= "entrez", all.x = TRUE)
+
+#rename the listed Fold changes for the genes with the human equivalent for DO
+genes1<-DO_data$LFC
+names(genes1)<-DO_data$human_entrez
+genes1<-genes1[order(genes1, decreasing=TRUE)]
+head(genes1,10)
+```
+
+#Compare Cluster
+###Gene
+```{r}
+inputList <- list(`Exposed` = genes1)
+groups <- compareCluster(geneClusters=inputList,  fun = "gseGO", OrgDb=org.Hs.eg.db, pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/male_Hipp_Gene_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/male_Hipp_grouped_gene_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot34<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 11), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 13),
+        axis.text.x = element_text(size = 14),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot34
+dev.off()
+dot34
+```
+
+###KEGG
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseKEGG", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/male_Hipp_KEGG_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/male_Hipp_kegg_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot28<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 13), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot28
+dev.off()
+dot28
+```
+
+
+###Disease Ontology
+```{r}
+groups <- compareCluster(geneClusters=inputList,  fun = "gseDO", pvalueCutoff = 0.05, pAdjustMethod = "none")
+
+data<-data.frame(groups)
+write.csv(data ,file="Figure/Enrichment/male_Hipp_Disease_enrichment.csv")
+```
+
+
+```{r}
+tiff(file = 'Figure/Enrichment/male_Hipp_disease_enrichment.tiff', units="in", width=8, height=5, res=1000)
+dot32<-dotplot(groups,showCategory=3, split=".sign") +
+  geom_point(shape = 1,colour = "black") +
+  scale_color_viridis(option = "inferno", direction = -1) +
+  facet_grid(.~.sign)+
+  theme(panel.spacing = unit(0.5, "cm",data = NULL), panel.grid.minor = element_blank())+
+  scale_y_discrete(labels = function(x) ifelse(str_detect(x, "gap"), "", str_wrap(x, width = 45)))+
+  theme(axis.text.y = element_text(size = 12), 
+        strip.background = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.key.width= unit(0.3, 'cm'))  
+dot32
+dev.off()
+dot32
+```
+
+
+
